@@ -17,7 +17,7 @@ from ddsp.loss import MSSTFTLoss
 from utils.plot import plot_batch_detailed
 
 # Default path on my computer
-default_path = '/Users/esling/Datasets/instruments_solo_recordings/'
+default_path = '/home/huanghao.blur/datasets'
 # Define arguments
 parser = argparse.ArgumentParser()
 # Data arguments
@@ -26,8 +26,8 @@ parser.add_argument('--output',         type=str,   default='outputs',      help
 parser.add_argument('--dataset',        type=str,   default='violin_simple',help='Name of the dataset')
 parser.add_argument('--nbworkers',      type=int,   default=1,              help='Number of parallel workers (multithread)')
 # Preprocessing arguments
-parser.add_argument('--sr',             type=int,   default=16000,          help='Sample rate of the signal')
-parser.add_argument('--f0_estimate',    type=str,   default='crepe',        help='Type of F0 estimate')
+parser.add_argument('--sr',             type=int,   default=44100,          help='Sample rate of the signal')
+parser.add_argument('--f0_estimate',    type=str,   default='dio',        help='Type of F0 estimate')
 parser.add_argument('--fft_scales',     type=list,  default=[64, 6],        help='Minimum and number of scales')
 parser.add_argument('--smooth_kernel',  type=int,   default=8,              help='Size of the smoothing kernel')
 # DDSP parameters
@@ -122,7 +122,7 @@ else:
 fixed_audio, fixed_f0, fixed_loudness, fixed_fft = next(iter(test_loader))
 fixed_audio, fixed_f0, fixed_loudness, fixed_fft = fixed_audio.to(args.device), fixed_f0.to(args.device), fixed_loudness.to(args.device), fixed_fft
 fixed_batch = (fixed_audio, fixed_f0, fixed_loudness, fixed_fft)
-plot_batch_detailed(fixed_batch)
+# plot_batch_detailed(fixed_batch)
 # Set latent dims to output dims
 if (args.latent_dims == 0):
     args.latent_dims = args.output_size

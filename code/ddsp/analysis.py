@@ -2,9 +2,9 @@
 
 import torch
 import torch.nn as nn
-from pyworld import dio
+from pyworld import dio, harvest
 import numpy as np
-import crepe
+# import crepe
 
 # Lambda for computing squared amplitude
 amp = lambda x: x[:,:,0]**2 + x[:,:,1]**2
@@ -46,6 +46,11 @@ class FundamentalFrequency(Analysis):
         hop = int(1000 * self.block_size / self.sr)
         if self.method == "dio":
             f0 = dio(x.astype(np.float64), self.sr,
+                     frame_period=hop,
+                     f0_floor=50,
+                     f0_ceil=2000)[0]
+        elif self.method == "harvest":
+            f0 = harvest(x.astype(np.float64), self.sr,
                      frame_period=hop,
                      f0_floor=50,
                      f0_ceil=2000)[0]
