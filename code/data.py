@@ -14,6 +14,7 @@ import librosa
 from multiprocessing import cpu_count, Pool
 
 import pandas as pd
+import h5py
 
 """
 ###################
@@ -192,7 +193,7 @@ class MedlyDataset(Dataset):
         # Construct set of extractors
         self.construct_extractors(args)
         # Construct the FFT extractor
-        self.multi_fft = MultiscaleFFT(args.fft_scales)
+        self.multi_fft = MultiscaleFFT(args.scales)
         # Retrieve list of files
         tmp_files = sorted(glob.glob(datadir + '/raw/*.wav'))
         violin_train_meta = pd.read_csv(f'{datadir}/violin_training.csv')
@@ -205,19 +206,28 @@ class MedlyDataset(Dataset):
         if(not os.path.exists(datadir + '/data')):
             os.mkdir(datadir + '/data')
 
-        feat_files = glob.glob(datadir + '/data/*.npy')
-        if(len(violin_test_meta) + len(violin_train_meta) + len(violin_validation_meta) > len(feat_files)):
+        # feat_files = glob.glob(datadir + '/data/*.npy')
+        if not h5py.is_hdf5(datadir + '/data/dataset.hdf5'):
+            self.dataset_file = h5py.File(datadir + '/data/dataset.hdf5', 'a')
             self.preprocess_parallel(violin_meta)
-            feat_files = sorted(glob.glob(datadir + '/data/*.npy'))
+            self.dataset_file.flush()
+        else:
+            self.dataset_file = h5py.File(datadir + '/data/dataset.hdf5', 'r+')
 
-        feat_files = sorted(feat_files)
-        self.features_files.extend(feat_files)
+        self.features_files = sorted(list(filter(lambda x: x != 'gv', self.dataset_file.keys())))
+
+        if 'gv' not in self.dataset_file:
+            self.compute_normalization()
+        else:
+            self.mean = self.dataset_file['gv'][0]
+            self.var = self.dataset_file['gv'][1]
+
         # Analyze dataset
         self.analyze_dataset()
         # Create splits
         self.create_splits(splits, shuffle_files)
         # Compute mean and std of dataset
-        self.compute_normalization()
+        
         # Now we can create the normalization / augmentation transform
         self.transform = transform
         # Otherwise create a basic normalization / augmentation transform
@@ -235,9 +245,30 @@ class MedlyDataset(Dataset):
         self.extractors['loudness'] = Loudness(args.block_size, args.kernel_size).float()
 
     def preprocess_parallel(self, meta):
-        with Pool(max(1, cpu_count() -2)) as pool:
-            r = pool.map(self.preprocess_dataset, meta.iterrows())
-            print("Preprocess finished {}".format(len(r)))
+        # with Pool(max(1, cpu_count() -2)) as pool:
+        #     for result in pool.map(self.preprocess_dataset, meta.iterrows()):
+        #         for feat in result:
+        #             y = feat['audio']
+        #             grp = self.dataset_file.create_group(feat['name'])
+        #             self.features_files.append(feat['name'])
+        #             dset = grp.create_dataset('audio', y.shape, y.dtype, data=y)
+        #             fft_grp = grp.create_group('fft')
+        #             cur_fft = feat['fft']
+        #             for f in range(len(cur_fft)):
+        #                 nparr = cur_fft[f].data.cpu().numpy()
+        #                 fft_grp.create_dataset(f'{args.scales[f]}', data=nparr, shape=nparr.shape, dtype=nparr.dtype)
+                    
+        #             del feat['name']
+        #             del feat['audio']
+        #             del feat['fft']
+        #             for k, v in feat:
+        #                 grp.create_dataset(f'{k}', v.shape, dtype=v.dtype, data=v)
+
+        #     print("Preprocess finished {}".format(len(r)))
+
+        for r in meta.iterrows():
+            self.preprocess_dataset(r)
+        print("Preprocess finished {}".format(len(meta.iterrows())))
     
     def preprocess_dataset(self, meta):
         meta = meta[1]
@@ -246,7 +277,7 @@ class MedlyDataset(Dataset):
         f_name, _ = os.path.splitext(os.path.basename(cur_file))
         print(f'Preprocessing {f_name}')
         # Import audio
-        y, sr = librosa.core.load(cur_file)
+        y, sr = librosa.core.load(cur_file, None)
         # Compute all sequences
         mod = self.args.block_size * self.args.sequence_size
         # Reshape into batch x seq
@@ -254,17 +285,35 @@ class MedlyDataset(Dataset):
         # Compute the full multi-scales FFT
         cur_fft = self.multi_fft(torch.from_numpy(y))
         # Compute each batch feature
+
+        features_arr = []
         for i in range(y.shape[0]):
-            features = {}
-            features['name'] = f_name
-            features['audio'] = y[i]
-            features['fft'] = cur_fft[i]
-            # Compute features in dataset
+            grp = self.dataset_file.create_group(f'{f_name}_{i}')
+            self.features_files.append(f'{f_name}_{i}')
+            dset = grp.create_dataset('audio', y[i].shape, y[i].dtype, data=y[i])
+            fft_grp = grp.create_group('fft')
+            for f in range(len(cur_fft[i])):
+                nparr = cur_fft[i][f].data.cpu().numpy()
+                fft_grp.create_dataset(f'{args.scales[f]}', data=nparr, shape=nparr.shape, dtype=nparr.dtype)
+            
             for k, v in self.extractors.items():
-                features[k] = v(y[i])[:self.args.sequence_size]
-            # Save to numpy compressed format
-            save_path = '{}/data/{}_{}.npy'.format(self.data_dir, f_name, i)
-            np.save(save_path, features)
+                feat = v(y[i])[:self.args.sequence_size]
+                grp.create_dataset(f'{k}', feat.shape, dtype=feat.dtype, data=feat)
+
+        #     features = {}
+        #     features['name'] = f'{f_name}_{i}'
+        #     features['audio'] = y[i]
+        #     features['fft'] = cur_fft[i]
+        #     # Compute features in dataset
+        #     for k, v in self.extractors.items():
+        #         features[k] = v(y[i])[:self.args.sequence_size]
+
+        #     features_arr.append(features)
+        #     # # Save to numpy compressed format
+        #     # save_path = '{}/data/{}_{}.npy'.format(self.data_dir, f_name, i)
+        #     # np.save(save_path, features)
+
+        # return features_arr
     
     def switch_set(self, name):
         if (name == 'test'):
@@ -278,13 +327,29 @@ class MedlyDataset(Dataset):
         self.valid_files = None
         return self
             
+    # def compute_normalization(self):
+    #     self.mean = 0
+    #     self.var = 0
+    #     # Parse dataset to compute mean and norm
+    #     for n in range(len(self.features_files)):
+    #         data = np.load(self.features_files[n], allow_pickle=True).item()['audio']
+    #         data = torch.from_numpy(data).float()
+    #         # Current file stats
+    #         b_mean = data.mean()
+    #         b_var = (data - self.mean)
+    #         # Running mean and var
+    #         self.mean = self.mean + ((b_mean - self.mean) / (n + 1))
+    #         self.var = self.var + ((data - self.mean) * b_var).mean()
+    #     self.mean = float(self.mean)
+    #     self.var = float(np.sqrt(self.var / len(self.features_files)))
+
     def compute_normalization(self):
         self.mean = 0
         self.var = 0
         # Parse dataset to compute mean and norm
         for n in range(len(self.features_files)):
-            data = np.load(self.features_files[n], allow_pickle=True).item()['audio']
-            data = torch.from_numpy(data).float()
+            data = self.dataset_file[self.features_files[n]]['audio']
+            data = torch.from_numpy(np.array(data)).float()
             # Current file stats
             b_mean = data.mean()
             b_var = (data - self.mean)
@@ -293,10 +358,20 @@ class MedlyDataset(Dataset):
             self.var = self.var + ((data - self.mean) * b_var).mean()
         self.mean = float(self.mean)
         self.var = float(np.sqrt(self.var / len(self.features_files)))
+        ds = self.dataset_file.create_dataset('gv', (2,), np.float32)
+        ds[0] = self.mean
+        ds[1] = self.var
     
+    # def analyze_dataset(self):
+    #     # Fill some properties based on the first file
+    #     loaded = np.load(self.features_files[0], allow_pickle=True).item()
+    #     # Here we simply get the input and output shapes
+    #     self.input_size = loaded['audio'].shape
+    #     self.output_size = self.input_size
+
     def analyze_dataset(self):
         # Fill some properties based on the first file
-        loaded = np.load(self.features_files[0], allow_pickle=True).item()
+        loaded = self.dataset_file[self.features_files[0]]
         # Here we simply get the input and output shapes
         self.input_size = loaded['audio'].shape
         self.output_size = self.input_size
@@ -320,14 +395,26 @@ class MedlyDataset(Dataset):
                     None)
             self.features_files = [self.features_files[i] for i in train_idx]
 
+    # def __getitem__(self, idx):
+    #     loaded = np.load(self.features_files[idx], allow_pickle=True).item()
+    #     audio = torch.from_numpy(loaded['audio']).unsqueeze(0)
+    #     loudness = torch.from_numpy(loaded['loudness']).float().unsqueeze(0)
+    #     fft = loaded['fft']
+    #     f0 = torch.from_numpy(loaded['f0']).float().unsqueeze(0)
+    #     # Apply pre-processing
+    #     audio = self.transform(audio.float())
+    #     return audio, f0, loudness, fft
+
     def __getitem__(self, idx):
-        loaded = np.load(self.features_files[idx], allow_pickle=True).item()
-        audio = torch.from_numpy(loaded['audio']).unsqueeze(0)
-        loudness = torch.from_numpy(loaded['loudness']).float().unsqueeze(0)
-        fft = loaded['fft']
-        f0 = torch.from_numpy(loaded['f0']).float().unsqueeze(0)
+        f_name = self.features_files[idx]
+        loaded = self.dataset_file[f_name]
+        audio = torch.from_numpy(np.array(loaded['audio'])).unsqueeze(0)
+        loudness = torch.from_numpy(np.array(loaded['loudness'])).float().unsqueeze(0)
+        fft = [torch.from_numpy(np.array(loaded['fft'][str(x)])) for x in self.args.scales]
+        f0 = torch.from_numpy(np.array(loaded['f0'])).float().unsqueeze(0)
         # Apply pre-processing
         audio = self.transform(audio.float())
+        # print(f'({f_name}) x.shape={audio.shape}')
         return audio, f0, loudness, fft
 
     def __len__(self):
@@ -347,9 +434,8 @@ def load_dataset(args, **kwargs):
         dset_train = dset_train.switch_set('train')
     elif args.dataset == 'medley':
         dset_train = MedlyDataset(args.path + '/' + args.dataset, args, **kwargs)
-        dset_valid = copy.deepcopy(dset_train).switch_set('valid')
-        dset_test = copy.deepcopy(dset_train).switch_set('test')
-        dset_train = dset_train.switch_set('train')
+        dset_valid = MedlyDataset(args.path + '/' + args.dataset, args, **kwargs).switch_set('valid')
+        dset_test = MedlyDataset(args.path + '/' + args.dataset, args, **kwargs).switch_set('test')
     else:
         raise Exception('Wrong name of the dataset!')
     args.input_size = dset_train.input_size
@@ -375,7 +461,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=64, help='')
     parser.add_argument('--epochs', type=int, default=100, help='')
     parser.add_argument('--sr', type=int, default=44100)
-    parser.add_argument('--block_size', type=int, default=160, help='Number of samples in blocks')
+    parser.add_argument('--block_size', type=int, default=441, help='Number of samples in blocks')
     parser.add_argument('--kernel_size', type=int, default=15, help='Size of the kernel')
     parser.add_argument('--sequence_size', type=int, default=200, help='Size of the sequence')
     parser.add_argument('--fft_scales', type=list, default=[64, 6], help='Minimum and number of scales')
@@ -389,12 +475,12 @@ if __name__ == '__main__':
         args.scales.append(args.fft_scales[0] * (2 ** s))
     train_loader, valid_loader, test_loader, args = load_dataset(args)
     # Take fixed batch (train)
-    data = next(iter(train_loader))
-    print(len(data))
+    audio, f0, loudness, fft = next(iter(train_loader))
+    print(f'audio.shape={audio.shape}', f'f0.shape={f0.shape}', f'loudness.shape={loudness.shape}', f'fft len={len(fft)}')
     # plot_batch(data)
     # plot_batch_detailed(data)
     # Take fixed batch (train)
-    data = next(iter(test_loader))
-    print(data)
+    # data = next(iter(test_loader))
+    # print(data)
     # plot_batch(data)
     # plot_batch_detailed(data)

@@ -77,6 +77,7 @@ class Reverb(Effects):
         self.block_size = args.block_size
         self.sequence_size = args.sequence_size
         self.size = self.block_size * self.sequence_size
+
         # Decay parameter
         # self.decay   = nn.Parameter(torch.Tensor([2]), requires_grad=True)
         # Amount of reverb
@@ -97,25 +98,32 @@ class Reverb(Effects):
         self.wetdry = params[:, 1].unsqueeze(-1)
 
     def forward(self, z):
-        z, conditions = z
+        x, conditions = z
         # Pad the input sequence
-        y = nn.functional.pad(z, (0, self.size), "constant", 0)
+
+        y = nn.functional.pad(x, (0, self.size), "constant", 0)
         # Compute STFT
         Y_S = torch.rfft(y, 1)
         # Compute the current impulse response
         idx = torch.sigmoid(self.wetdry) * self.identity
         imp = torch.sigmoid(1 - self.wetdry) * self.impulse
-        dcy = torch.exp(-(torch.exp(self.decay) + 2) * torch.linspace(0,1, self.size).to(z.device))
+        dcy = torch.exp(-(torch.exp(self.decay) + 2) * torch.linspace(0,1, self.size).to(x.device))
         final_impulse = idx + imp * dcy
+
         # Pad the impulse response
         impulse = nn.functional.pad(final_impulse, (0, self.size), "constant", 0)
+
         if y.shape[-1] > self.size:
             impulse = nn.functional.pad(impulse, (0, y.shape[-1] - impulse.shape[-1]), "constant", 0)
+
+
         IR_S = torch.rfft(impulse.detach(),1).expand_as(Y_S)
         # Apply the reverb
         Y_S_CONV = torch.zeros_like(IR_S)
         Y_S_CONV[:,:,0] = Y_S[:,:,0] * IR_S[:,:,0] - Y_S[:,:,1] * IR_S[:,:,1]
         Y_S_CONV[:,:,1] = Y_S[:,:,0] * IR_S[:,:,1] + Y_S[:,:,1] * IR_S[:,:,0]
         # Invert the reverberated signal
-        y = torch.irfft(Y_S_CONV, 1, signal_sizes=(y.shape[-1],))
+        ## TODO: This will cut off the reverb tail
+        y = torch.irfft(Y_S_CONV, 1, signal_sizes=(y.shape[-1],))[:, :self.size]
+
         return y

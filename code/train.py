@@ -33,7 +33,7 @@ parser.add_argument('--smooth_kernel',  type=int,   default=8,              help
 # DDSP parameters
 parser.add_argument('--n_partial',      type=int,   default=50,             help='Number of partials')
 parser.add_argument('--filter_size',    type=int,   default=64,             help='Size of the filter')
-parser.add_argument('--block_size',     type=int,   default=160,            help='Number of samples in blocks')
+parser.add_argument('--block_size',     type=int,   default=441,            help='Number of samples in blocks')
 parser.add_argument('--kernel_size',    type=int,   default=15,             help='Size of the kernel')
 parser.add_argument('--sequence_size',  type=int,   default=200,            help='Size of the sequence')
 parser.add_argument('--synth_type',     type=str,   default='basic',        help='Size of the sequence')
@@ -41,7 +41,7 @@ parser.add_argument('--synth_type',     type=str,   default='basic',        help
 parser.add_argument('--model',          type=str,   default='vae',          help='Type of model (mlp, cnn, ae, vae, wae, flow)')
 parser.add_argument('--layers',         type=str,   default='gru',          help='Type of layers in the model')
 parser.add_argument('--loss',           type=str,   default='msstft',       help='Type of layers in the model')
-parser.add_argument('--strides',        type=list,  default=[2,4,4,5],      help='Set of processing strides')
+parser.add_argument('--strides',        type=list,  default=[7,7,3,3],      help='Set of processing strides')
 parser.add_argument('--n_hidden',       type=int,   default=512,            help='Number of hidden units')
 parser.add_argument('--n_layers',       type=int,   default=4,              help='Number of computing layers')
 parser.add_argument('--channels',       type=int,   default=128,            help='Number of channels in convolution')

@@ -68,14 +68,16 @@ class DDSSynth(AE):
     def train_epoch(self, loader, loss, optimizer, args):
         self.train()
         full_loss = 0
-        for (x, f0, loud, y) in loader:
+        for i, (x, f0, loud, fft) in enumerate(loader):
+            print(f'- Batch {i} size = {f0.shape[0]}')
             # Send to device
             x, f0, loud = [it.to(args.device, non_blocking=True) for it in [x, f0, loud]]
             f0, loud = f0.transpose(1, 2), loud.transpose(1, 2)
             # Auto-encode
             x_tilde, z_tilde, z_loss = self((x, (f0, loud)))
+
             # Reconstruction loss
-            rec_loss = loss(x_tilde, y) / float(x.shape[1] * x.shape[2])
+            rec_loss = loss(x_tilde, fft) / float(x.shape[1] * x.shape[2])
             # Final loss
             b_loss = (rec_loss + (args.beta * z_loss)).mean(dim=0)
             # Perform backward
@@ -233,9 +235,11 @@ class Decoder(nn.Module):
             f0, lo = condition
         # Forward pass for the encoding
         z = z.transpose(1, 2)
+
         f0 = self.f0_MLP(f0)
         lo = self.lo_MLP(lo)
         z  = self.z_MLP(z)
+
         # Recurrent model
         x, h = self.gru(torch.cat([z, f0, lo], -1), hx)
         # Mixing parameters

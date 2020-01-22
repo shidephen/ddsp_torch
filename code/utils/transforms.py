@@ -47,7 +47,7 @@ class NormalizeTensor(object):
             data = (data - self.mean) / self.std
         else:
             for c in range(data.shape[0]):
-                data[c] = (data[c] - self.mean[c]) / self.std[c]
+                data[c] = (data[c] - self.mean) / self.std
         return data   
 
 class NoiseGaussian(object):
